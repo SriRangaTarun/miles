@@ -2,7 +2,7 @@ import argparse
 import json
 import logging
 import os
-from typing import Any
+from typing import Any, Optional
 
 import yaml
 from sglang_router.launch_router import RouterArgs
