@@ -74,6 +74,32 @@ generation. If it is empty, rollout is still the bottleneck and async cannot hid
 | `--global-batch-size` | Number of samples the trainer drains per step |
 | `--num-steps-per-rollout` | Number of optimizer steps per queue drain cycle |
 | `--max-weight-staleness` | When the rollout engine's weight version lags the trainer's by more than this, the worker recycles the stale group instead of feeding it to the loss |
+| `--use-dynamic-global-batch-size` | Resizes `global_batch_size` to the collected sample count instead of trimming down to it |
+
+### One optimizer step per drain
+
+Fully-async is not a separate mode: it reuses the `train_async.py` driver and only
+swaps in `generate_rollout_fully_async` as the rollout function. The drained batch
+therefore flows through the same consume path as sync training, and
+`--num-steps-per-rollout` splits it into that many optimizer steps exactly as it
+would there.
+
+That interacts with staleness. Each drained batch already carries an inter-batch
+weight-version gap bounded by `--max-weight-staleness`. If
+`--num-steps-per-rollout` is greater than 1, steps 2…N are applied to weights that
+have already moved since the data was generated, which stacks per-batch
+off-policyness on top of that gap. This is legitimate in overlapped async, but it
+is rarely what you want in fully-async, so Miles logs a warning when both are set.
+Keep one optimizer step per drain unless you specifically want the extra
+off-policyness.
+
+`--use-dynamic-global-batch-size` exists to avoid sample-trim waste when the
+collected sample count varies (dynamic sampling, oversampling recycle). In
+fully-async the drain count is already fixed at `rollout_batch_size`, so there is
+no trim waste to avoid; its only remaining effect is to resize `global_batch_size`
+so that `num_steps_per_rollout` works out to 1. That is a valid way to pin the
+one-step-per-drain invariant, just an indirect one — setting
+`--num-steps-per-rollout 1` says the same thing more plainly.
 
 The reference worker caps its output queue at 1000 groups, so if training is slower
 than rollout the producer eventually blocks rather than growing the queue without
